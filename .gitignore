@@ -45,9 +45,12 @@ tags
 .pytest_cache/
 .mypy_cache/
 .vscode/
+.claude/
 
 *.swp
 
 ./pretrain
 .idea/
 .aider*
+
+
