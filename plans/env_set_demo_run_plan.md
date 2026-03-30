@@ -1,205 +1,352 @@
-# Plan: QLib Environment Setup & Demo Run (Windows + Conda)
+# Windows Qlib Local Demo Run Plan
 
-## Goal
+## Summary
 
-Set up a working QLib development environment on a local Windows machine using a fresh conda environment, download the required datasets into this repo's directory structure, and run a few demos to verify everything works.
+This plan sets up a local Windows Qlib development environment for this repo, keeps the demo dataset inside the repo at `e:/Projects/qlib/qlib_data/cn_data`, and validates the setup with:
 
----
+1. a lightweight data-access sanity script
+2. one full LightGBM workflow run
 
-## Phase 1: Create Conda Environment & Install QLib
+The preferred manual shell flow uses `conda activate qlib`. The equivalent automation-safe flow uses `conda run -n qlib ...` for each command.
 
-### Step 1.1 — Create a new conda environment
+## Preflight
 
-```bash
-conda create -n qlib python=3.10 -y
+Current machine state before execution:
+
+- `conda` is installed
+- no dedicated `qlib` conda environment exists yet
+- no repo-local `qlib_data/` directory exists yet
+- git worktree is clean
+
+## Command Style
+
+Use one of these command styles consistently:
+
+- Manual interactive shell:
+
+```powershell
 conda activate qlib
 ```
 
-> Python 3.10 is recommended for broad compatibility. QLib supports 3.8–3.12.
+Use this when you are working in one terminal session and want shorter commands.
 
-### Step 1.2 — Install build dependencies
+- Non-interactive or automation:
 
-```bash
-pip install numpy>=1.24.0 cython setuptools setuptools-scm
+```powershell
+conda run -n qlib <command>
 ```
 
-These are needed to compile QLib's Cython extensions (`rolling.pyx`, `expanding.pyx`).
+Use this when commands are run individually, from automation, or from tools that do not preserve shell session state.
 
-### Step 1.3 — Install QLib from source (editable mode)
+## Phase 1: Create And Verify The Environment
 
-Since we're working from the cloned repo:
+### 1.1 Create the environment
 
-```bash
-cd e:\Projects\qlib
-pip install -e .[dev]
+```powershell
+conda create -n qlib python=3.11 -y
 ```
 
-This installs QLib in development mode with test dependencies (`pytest`, `statsmodels`).
+### 1.2 Install Qlib from source
 
-### Step 1.4 — Verify installation
+Manual interactive shell:
 
-```bash
-python -c "import qlib; print(qlib.__version__)"
+```powershell
+conda activate qlib
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+python -m pip install numba
 ```
 
-If this prints the version without errors, installation succeeded. If you see an error about `qlib.data._libs.rolling`, run:
+Automation-safe form:
 
-```bash
+```powershell
+conda run -n qlib python -m pip install --upgrade pip
+conda run -n qlib python -m pip install -e ".[dev]"
+conda run -n qlib python -m pip install numba
+```
+
+Why `numba` is explicit here:
+
+- it is not part of the base package dependency list in `pyproject.toml`
+- the repo's CI installs it before running the benchmark workflow on source builds
+
+### 1.3 Verify imports
+
+Manual interactive shell:
+
+```powershell
+python -c "import qlib, lightgbm; print(qlib.__version__)"
+```
+
+Automation-safe form:
+
+```powershell
+conda run -n qlib python -c "import qlib, lightgbm; print(qlib.__version__)"
+```
+
+If the import fails with a compiled extension error such as `qlib.data._libs.rolling` or `qlib.data._libs.expanding`, rebuild in place and retry:
+
+Manual interactive shell:
+
+```powershell
 python setup.py build_ext --inplace
+python -c "import qlib, lightgbm; print(qlib.__version__)"
 ```
 
----
+Automation-safe form:
 
-## Phase 2: Download Datasets
-
-### Step 2.1 — Download CN daily data
-
-Store data inside the repo to keep everything self-contained:
-
-```bash
-python -m qlib.tests.data qlib_data --target_dir ./qlib_data/cn_data --region cn
+```powershell
+conda run -n qlib python setup.py build_ext --inplace
+conda run -n qlib python -c "import qlib, lightgbm; print(qlib.__version__)"
 ```
 
-If the official source is down, use the community alternative:
+## Phase 2: Download And Check Repo-Local Data
 
-```bash
-# Download from: https://github.com/chenditc/investment_data/releases
-# Extract the qlib_bin.tar.gz into ./qlib_data/cn_data/
+Target dataset path:
+
+```text
+e:/Projects/qlib/qlib_data/cn_data
 ```
 
-### Step 2.2 — (Optional) Download US daily data
+### 2.1 Download CN daily data
 
-```bash
-python -m qlib.tests.data qlib_data --target_dir ./qlib_data/us_data --region us
+Primary path: use the built-in downloader because it matches the current repo code and CI flow.
+
+Manual interactive shell:
+
+```powershell
+python -m qlib.cli.data qlib_data --target_dir e:/Projects/qlib/qlib_data/cn_data --interval 1d --region cn
 ```
 
-### Step 2.3 — Verify data health
+Automation-safe form:
 
-```bash
-python scripts/check_data_health.py check_data --qlib_dir ./qlib_data/cn_data
+```powershell
+conda run -n qlib python -m qlib.cli.data qlib_data --target_dir e:/Projects/qlib/qlib_data/cn_data --interval 1d --region cn
 ```
 
-### Expected data directory structure
+If `qlib_data/cn_data` already exists on a rerun, prefer the skip-safe form instead of re-downloading:
 
+```powershell
+python -m qlib.cli.data qlib_data --target_dir e:/Projects/qlib/qlib_data/cn_data --interval 1d --region cn --exists_skip True
 ```
-e:\Projects\qlib\qlib_data\
-  cn_data\
-    calendars\
-    features\
-    instruments\
+
+or:
+
+```powershell
+conda run -n qlib python -m qlib.cli.data qlib_data --target_dir e:/Projects/qlib/qlib_data/cn_data --interval 1d --region cn --exists_skip True
+```
+
+### 2.2 Fallback if the built-in download fails
+
+If the built-in download returns 404, times out, or otherwise fails, use the community dataset linked in the repo `README.md` and extract it into:
+
+```text
+e:/Projects/qlib/qlib_data/cn_data
+```
+
+Expected structure after download or extraction:
+
+```text
+e:/Projects/qlib/qlib_data/
+  cn_data/
+    calendars/
+    features/
+    instruments/
     ...
-  us_data\        (optional)
-    ...
 ```
 
-> Add `qlib_data/` to `.gitignore` if not already there to avoid committing large binary data.
+### 2.3 Run data health checks
 
----
+Manual interactive shell:
 
-## Phase 3: Run Demo Scripts
+```powershell
+python scripts/check_data_health.py check_data --qlib_dir e:/Projects/qlib/qlib_data/cn_data
+```
 
-All demos require wrapping in `if __name__ == "__main__":` on Windows due to the `spawn` multiprocessing model. The existing example scripts already handle this.
+Automation-safe form:
 
-### Demo 1 — Minimal data access (sanity check)
+```powershell
+conda run -n qlib python scripts/check_data_health.py check_data --qlib_dir e:/Projects/qlib/qlib_data/cn_data
+```
 
-Create and run a quick script to confirm data loading works:
+Success criteria:
+
+- Qlib initializes against the repo-local data path
+- the script completes without crashing
+- warnings are acceptable findings to review, but path or initialization failures are blocking
+
+## Phase 3: Run Demo Validations
+
+### 3.1 Create and run a temporary sanity script
+
+Create a temporary file at:
+
+```text
+plans/_tmp_demo_sanity.py
+```
+
+Script content:
 
 ```python
-# save as demo_sanity.py in repo root
 import qlib
 from qlib.constant import REG_CN
 from qlib.data import D
 
-if __name__ == "__main__":
-    qlib.init(provider_uri="./qlib_data/cn_data", region=REG_CN)
 
-    # Check trading calendar
+if __name__ == "__main__":
+    qlib.init(provider_uri=r"e:/Projects/qlib/qlib_data/cn_data", region=REG_CN)
+
     calendar = D.calendar(start_time="2020-01-01", end_time="2020-12-31")
     print(f"Trading days in 2020: {len(calendar)}")
 
-    # Fetch stock features
     fields = ["$close", "$volume", "Ref($close, 1)", "Mean($close, 5)"]
     df = D.features(["SH600000"], fields, start_time="2020-01-01", end_time="2020-12-31")
     print(df.head(10))
 ```
 
-```bash
-python demo_sanity.py
+Run it:
+
+Manual interactive shell:
+
+```powershell
+python plans/_tmp_demo_sanity.py
 ```
 
-**Expected result**: prints ~244 trading days and a DataFrame with close/volume/derived features.
+Automation-safe form:
 
-### Demo 2 — Full workflow (model training + backtest)
-
-```bash
-cd examples
-python workflow_by_code.py
+```powershell
+conda run -n qlib python plans/_tmp_demo_sanity.py
 ```
 
-This runs the complete pipeline: data loading -> Alpha158 feature engineering -> LightGBM training -> prediction -> backtest -> analysis report.
+Success criteria:
 
-**Expected result**: training logs, IC/ICIR metrics, and backtest return summary printed to console. Takes a few minutes.
+- prints a non-empty 2020 trading calendar count
+- prints a non-empty feature DataFrame for `SH600000`
 
-### Demo 3 — YAML-based workflow via `qrun`
+Delete the temporary script after the check completes.
 
-```bash
-cd examples
-qrun benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
+### 3.2 Create and run a repo-local workflow config
+
+Create a temporary file at:
+
+```text
+plans/_tmp_workflow_config_lightgbm_Alpha158.local.yaml
 ```
 
-This is the same workflow as Demo 2 but driven by a YAML config file, which is the standard way to run QLib experiments.
+Source:
 
-**Expected result**: same kind of output as Demo 2 — model metrics and backtest results.
-
-### Demo 4 — (Optional) Jupyter notebook
-
-```bash
-cd examples
-jupyter notebook workflow_by_code.ipynb
+```text
+examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml
 ```
 
-Walk through the notebook cells interactively for a step-by-step understanding of the workflow.
+Change only this field:
 
----
-
-## Phase 4: Verify & Clean Up
-
-### Step 4.1 — Confirm all demos ran without errors
-
-Check that:
-- [ ] `import qlib` works
-- [ ] Data loads without file-not-found errors
-- [ ] LightGBM model trains and produces predictions
-- [ ] Backtest completes and prints return metrics
-
-### Step 4.2 — Clean up temporary files
-
-```bash
-# Remove demo script if created
-del demo_sanity.py
-
-# Remove mlflow artifacts if not needed
-rmdir /s /q mlruns
+```yaml
+qlib_init:
+    provider_uri: "e:/Projects/qlib/qlib_data/cn_data"
 ```
 
----
+Keep the rest of the config unchanged.
 
-## Troubleshooting
+Run the workflow from the repo root:
 
-| Problem | Solution |
-|---------|----------|
-| `No module named 'qlib.data._libs.rolling'` | Run `python setup.py build_ext --inplace` |
-| Data download hangs or fails | Use the community data source (chenditc/investment_data on GitHub) |
-| `RuntimeError: freeze_support()` | Wrap code in `if __name__ == "__main__":` |
-| Redis connection errors | Redis is optional — QLib works without it, just no caching |
-| `pip install -e .` fails with missing headers | Ensure you're inside a conda env, not system Python |
-| Import errors when running from repo root | Run scripts from `examples/` or another directory to avoid shadowing the `qlib` package |
+Manual interactive shell:
 
----
+```powershell
+python -m qlib.cli.run plans/_tmp_workflow_config_lightgbm_Alpha158.local.yaml
+```
 
-## Notes
+Automation-safe form:
 
-- **Memory**: 16GB RAM recommended. 8GB minimum.
-- **Disk**: ~5GB free for data + models.
-- **Redis**: Not required for local demos. Only needed for caching in production setups.
-- **GPU**: Not needed for LightGBM demos. Only required for deep learning models (LSTM, Transformer, etc.) — install PyTorch separately if needed.
+```powershell
+conda run -n qlib python -m qlib.cli.run plans/_tmp_workflow_config_lightgbm_Alpha158.local.yaml
+```
+
+Success criteria:
+
+- the workflow runs to completion without traceback
+- training and backtest output is printed
+- a run is created under `mlruns/`
+
+Delete the temporary workflow config after the run completes.
+
+## Phase 4: Post-Run State
+
+Keep these outputs after execution:
+
+- `e:/Projects/qlib/qlib_data/cn_data`
+- `e:/Projects/qlib/mlruns`
+
+Delete only the temporary helper files:
+
+- `plans/_tmp_demo_sanity.py`
+- `plans/_tmp_workflow_config_lightgbm_Alpha158.local.yaml`
+
+## Expected Blocking Conditions
+
+These are blocking failures for this plan:
+
+- environment creation fails
+- editable install fails
+- `import qlib` still fails after the rebuild fallback
+- data download and fallback download both fail
+- repo-local data cannot initialize with Qlib
+- the sanity script crashes or returns empty results
+- the LightGBM workflow crashes before producing a run under `mlruns/`
+
+## Notes For This Machine
+
+- Python 3.11 is used because it is already present locally and is covered by the repo's Windows CI.
+- This plan intentionally keeps data inside the repo instead of `~/.qlib/...`.
+- `workflow_by_code.py`, notebooks, US data, RL flows, and multi-model runs are out of scope for this pass.
+- Package installation and dataset download require network-enabled execution outside the current sandbox.
+
+## Execution Results: 2026-03-30
+
+Execution status on this machine:
+
+- `conda create -n qlib python=3.11 -y` succeeded
+- editable install succeeded with `conda run -n qlib python -m pip install -e ".[dev]"`
+- `numba` was installed successfully
+- `conda run -n qlib python -c "import qlib, lightgbm; print(qlib.__version__)"` succeeded and printed `0.9.8.dev28`
+- built-in CN daily data download succeeded; no fallback source was needed
+- repo-local data now exists under `e:/Projects/qlib/qlib_data/cn_data`
+- the downloaded archive `20260330120555_qlib_data_cn_1d_latest.zip` was left in `qlib_data/cn_data`
+
+Observed data health check outcome:
+
+- Qlib initialized successfully against `e:/Projects/qlib/qlib_data/cn_data`
+- the script completed without crashing
+- the script reported missing-data warnings for many instruments
+- the script reported large-step-change warnings in OHLCV data
+- required columns, factor presence, and lowercase feature directory checks passed
+
+Observed sanity-script outcome:
+
+- `plans/_tmp_demo_sanity.py` ran successfully
+- `Trading days in 2020: 180`
+- feature lookup for `SH600000` returned a non-empty DataFrame
+
+Observed workflow outcome:
+
+- `conda run -n qlib python -m qlib.cli.run plans/_tmp_workflow_config_lightgbm_Alpha158.local.yaml` completed successfully
+- best LightGBM iteration: `18`
+- reported metrics:
+  - `IC = 0.04680587323833807`
+  - `ICIR = 0.3815683918932705`
+  - `Rank IC = 0.049049290457489736`
+  - `Rank ICIR = 0.406748756941287`
+- reported excess return with cost:
+  - `annualized_return = 0.080654`
+  - `information_ratio = 0.914486`
+  - `max_drawdown = -0.086083`
+- a workflow run was created under `e:/Projects/qlib/mlruns`
+
+Cleanup completed:
+
+- temporary helper files were removed:
+  - `plans/_tmp_demo_sanity.py`
+  - `plans/_tmp_workflow_config_lightgbm_Alpha158.local.yaml`
+- retained outputs:
+  - `e:/Projects/qlib/qlib_data/cn_data`
+  - `e:/Projects/qlib/mlruns`
